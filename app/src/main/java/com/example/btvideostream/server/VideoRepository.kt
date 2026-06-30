@@ -18,24 +18,45 @@ class VideoRepository(private val context: Context, private val bt: BluetoothMan
     private val cacheDir = File(context.cacheDir, "video_cache").also { it.mkdirs() }
     private val TAG = "VideoRepository"
 
-    // User-Agent del cliente IOS que obtiene la URL (YouTube valida que coincidan)
     private val IOS_UA = "com.google.ios.youtube/19.45.4 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)"
+    private val BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+
+    init {
+        // Forzar IPv4 para que el token IP del stream de YouTube coincida con la descarga.
+        // Las privacy extensions de IPv6 en Android rotan la dirección temporal entre
+        // peticiones causando 403 en el CDN de googlevideo.com
+        System.setProperty("java.net.preferIPv4Stack", "true")
+        System.setProperty("java.net.preferIPv6Addresses", "false")
+        // Diagnóstico: loguear IPs del dispositivo para comparar con ip= del CDN
+        try {
+            val ifaces = java.net.NetworkInterface.getNetworkInterfaces()?.toList() ?: emptyList()
+            val addrs = ifaces.flatMap { it.inetAddresses.toList() }
+                .filter { !it.isLoopbackAddress }
+                .map { it.hostAddress }
+            Log.d(TAG, "Device IPs: $addrs")
+        } catch (e: Exception) { /* ignorar */ }
+    }
 
     suspend fun handleSearch(query: String, source: String = "yt") = withContext(Dispatchers.IO) {
         try {
+            bt.send(Message.Status("Buscando \"$query\" en $source…"))
             when (source) {
                 "tt" -> handleTikTokSearch(query)
                 "web" -> handleWebSearch(query)
                 else -> handleYouTubeSearch(query)
             }
         } catch (e: Exception) {
-            bt.send(Message.VideoError("Error en búsqueda: ${e.javaClass.simpleName} - ${e.message}"))
+            Log.e(TAG, "Error en búsqueda", e)
+            bt.send(Message.VideoError("Error en búsqueda: ${e.message}"))
         }
     }
 
     private fun handleYouTubeSearch(query: String) {
         val results = YouTubeService.search(query)
-        if (results.isEmpty()) { bt.send(Message.VideoError("Sin resultados para \"$query\"")); return }
+        if (results.isEmpty()) {
+            bt.send(Message.VideoError("YouTube no devolvió resultados para \"$query\""))
+            return
+        }
         bt.send(Message.SearchResults(JSONArray().apply {
             results.forEach { r -> put(JSONObject().apply {
                 put("id", r.videoId); put("title", r.title)
@@ -46,11 +67,14 @@ class VideoRepository(private val context: Context, private val bt: BluetoothMan
 
     private fun handleTikTokSearch(query: String) {
         val results = TikTokService.search(query)
-        // TikTok siempre devuelve algo (resultados reales o fallback)
+        if (results.isEmpty()) {
+            bt.send(Message.VideoError("TikTok no devolvió resultados para \"$query\""))
+            return
+        }
         bt.send(Message.SearchResults(JSONArray().apply {
             results.forEach { r -> put(JSONObject().apply {
                 put("id", r.videoId); put("title", r.title)
-                put("channel", r.channel); put("duration", r.duration); put("thumb", "")
+                put("channel", r.channel); put("duration", r.duration); put("thumb", r.thumbnailUrl)
                 put("source", "tt")
             }) }
         }.toString()))
@@ -58,15 +82,13 @@ class VideoRepository(private val context: Context, private val bt: BluetoothMan
 
     private fun handleWebSearch(query: String) {
         val results = GoogleService.search(query)
-        if (results.isEmpty()) { bt.send(Message.VideoError("Sin resultados web para \"$query\"")); return }
+        if (results.isEmpty()) { bt.send(Message.VideoError("Sin resultados web")); return }
         bt.send(Message.SearchResults(JSONArray().apply {
             results.forEach { r -> put(JSONObject().apply {
                 put("id", "web_${r.url.hashCode()}")
                 put("title", r.title)
-                put("channel", r.domain.ifEmpty { r.url.take(40) })
-                put("duration", r.snippet.take(80))
-                put("thumb", "")
-                put("source", "web")
+                put("channel", r.domain)
+                put("duration", r.snippet)
                 put("url", r.url)
             }) }
         }.toString()))
@@ -78,72 +100,64 @@ class VideoRepository(private val context: Context, private val bt: BluetoothMan
                 val preferLow = quality == VideoQuality.LOW || quality == VideoQuality.AUDIO_ONLY
                 val cacheFile = File(cacheDir, "$videoId.mp4")
 
-                val videoBytes = if (cacheFile.exists() && cacheFile.length() > 1024) {
-                    Log.d(TAG, "Cache HIT: $videoId (${cacheFile.length()} bytes)")
-                    bt.send(Message.Status("Enviando desde caché…"))
-                    cacheFile.readBytes()
-                } else {
-                    val streamInfo = when {
-                        videoId.startsWith("tt_") -> TikTokService.getVideoUrl(videoId)
-                            ?: YouTubeService.getStreamUrl(videoId, preferLow)
-                        videoId.startsWith("web_") -> null // no hay video para resultados web
-                        else -> YouTubeService.getStreamUrl(videoId, preferLow)
-                    } ?: run {
-                        bt.send(Message.VideoError("No se encontró stream para $videoId"))
-                        return@withContext
-                    }
-                    val isDemoFallback = streamInfo.quality == "demo"
-                    Log.d(TAG, "Descargando: ${streamInfo.url.take(100)}")
-                    bt.send(Message.Status(if (isDemoFallback)
-                        "⚠ Usando video de demostración…"
-                    else "Descargando ${streamInfo.quality}…"))
-                    val bytes = downloadUrl(streamInfo.url)
-                    Log.d(TAG, "Descarga completa: ${bytes.size} bytes")
-                    cacheFile.writeBytes(bytes)
-                    bytes
+                if (cacheFile.exists() && cacheFile.length() > 50000) {
+                    bt.send(Message.Status("Caché: enviando $videoId…"))
+                    bt.sendVideoData(cacheFile.readBytes())
+                    return@withContext
                 }
 
-                bt.send(Message.Status("Enviando por Bluetooth…"))
-                bt.sendVideoData(videoBytes)
+                bt.send(Message.Status("Obteniendo enlace de stream…"))
+                val streamInfo = when {
+                    videoId.startsWith("tt_") -> TikTokService.getVideoUrl(videoId)
+                    else -> YouTubeService.getStreamUrl(videoId, preferLow)
+                }
+
+                if (streamInfo == null) {
+                    bt.send(Message.VideoError("No se pudo extraer el video (Servidores ocupados)"))
+                    return@withContext
+                }
+
+                bt.send(Message.Status("Descargando: ${streamInfo.title.take(20)}…"))
+                val bytes = downloadUrl(streamInfo.url, streamInfo.cookies)
+                
+                if (bytes.size < 1000) {
+                    bt.send(Message.VideoError("Error: Video descargado corrupto o vacío"))
+                    return@withContext
+                }
+
+                cacheFile.writeBytes(bytes)
+                bt.send(Message.Status("Enviando por Bluetooth (${(bytes.size/1024)} KB)…"))
+                bt.sendVideoData(bytes)
             } catch (e: Exception) {
-                Log.e(TAG, "Error al obtener video", e)
-                bt.send(Message.VideoError("Error al obtener video: ${e.javaClass.simpleName}: ${e.message?.take(100)}"))
+                Log.e(TAG, "Error handleVideoRequest", e)
+                bt.send(Message.VideoError("Error al descargar: ${e.javaClass.simpleName}"))
             }
         }
 
-    private fun downloadUrl(urlStr: String): ByteArray {
-        val userAgents = listOf(
-            IOS_UA,
-            "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36",
-            "Mozilla/5.0"
-        )
-        for (ua in userAgents) {
-            try {
-                val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    instanceFollowRedirects = true
-                    setRequestProperty("User-Agent", ua)
-                    setRequestProperty("Accept", "*/*")
-                    connectTimeout = 20_000
-                    readTimeout = 180_000
-                }
-                val code = conn.responseCode
-                Log.d(TAG, "Download HTTP $code | UA: ${ua.take(50)}")
-                if (code in 200..299) {
-                    val bytes = conn.inputStream.use { it.readBytes() }
-                    conn.disconnect()
-                    Log.d(TAG, "Download OK: ${bytes.size} bytes")
-                    return bytes
-                }
-                val errBody = conn.errorStream?.bufferedReader()?.readText()?.take(200) ?: ""
-                Log.w(TAG, "Download $code | $errBody")
-                conn.disconnect()
-            } catch (e: Exception) {
-                Log.w(TAG, "Download excepción con UA ${ua.take(30)}: ${e.javaClass.simpleName}: ${e.message?.take(100)}")
+    fun downloadUrl(urlStr: String, cookies: String? = null): ByteArray {
+        val isYouTube = urlStr.contains("googlevideo.com")
+        // El parámetro n requiere transformación JS para el CDN; quitarlo evita el 403
+        // (YouTube throttlea la velocidad pero sirve el contenido)
+        val finalUrl = if (isYouTube) urlStr.replace(Regex("&n=[^&]+"), "") else urlStr
+        val conn = (URL(finalUrl).openConnection() as HttpURLConnection).apply {
+            setRequestProperty("User-Agent", if (isYouTube) BROWSER_UA else IOS_UA)
+            if (isYouTube) {
+                setRequestProperty("Range", "bytes=0-")
+                setRequestProperty("Referer", "https://www.youtube.com/")
+                setRequestProperty("Origin", "https://www.youtube.com")
+                setRequestProperty("Accept", "*/*")
+                setRequestProperty("Accept-Encoding", "identity")
+                if (!cookies.isNullOrEmpty()) setRequestProperty("Cookie", cookies)
             }
+            connectTimeout = 30000
+            readTimeout = 120000
+            instanceFollowRedirects = true
         }
-        throw Exception("No se pudo descargar el video (${urlStr.take(60)})")
+        val code = conn.responseCode
+        Log.d(TAG, "Download HTTP $code — ${finalUrl.take(80)}")
+        if (code !in 200..206) {
+            throw java.io.IOException("HTTP $code al descargar")
+        }
+        return conn.inputStream.use { it.readBytes() }
     }
-
-    fun clearCache() = cacheDir.listFiles()?.forEach { it.delete() }
 }
