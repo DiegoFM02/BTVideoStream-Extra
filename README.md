@@ -261,5 +261,10 @@ adb -s <DEVICE_ID_CLIENTE> install -r app/build/outputs/apk/debug/app-debug.apk
 | Fecha de entrega | 01 de julio de 2026 |
 
 ## Video demostración
-Solo accesible por dominio de correo electronico del IPN:
+Solo accesible por dominio de correo electronico del IPN (antes de que funcionara el modulo de YT):
+
 https://correoipn-my.sharepoint.com/:v:/g/personal/dfloresm1300_alumno_ipn_mx/IQC7RxhW2f6fTLZ7PHFAkSM5AREiENaLq6KXLooHTZqhV0o?nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=J5Vklj
+
+Solo accesible por dominio de correo electronico del IPN (TODO FUNCIONAL):
+
+https://correoipn-my.sharepoint.com/:v:/g/personal/dfloresm1300_alumno_ipn_mx/IQAcWpscVtWeQZJaCGSbxZheAfJHryaI7DDji60gMn6RoyE?nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=1d2d1y
