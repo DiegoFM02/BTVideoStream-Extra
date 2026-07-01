@@ -257,3 +257,7 @@ adb -s <DEVICE_ID_CLIENTE> install -r app/build/outputs/apk/debug/app-debug.apk
 | Plan | Ingeniería en Sistemas Computacionales 2020 |
 | Tipo | Examen Extraordinario |
 | Fecha de entrega | 01 de julio de 2026 |
+
+## Video demostración
+Solo accesible por dominio de correo electronico del IPN:
+https://correoipn-my.sharepoint.com/:v:/g/personal/dfloresm1300_alumno_ipn_mx/IQC7RxhW2f6fTLZ7PHFAkSM5AREiENaLq6KXLooHTZqhV0o?nav=eyJyZWZlcnJhbEluZm8iOnsicmVmZXJyYWxBcHAiOiJPbmVEcml2ZUZvckJ1c2luZXNzIiwicmVmZXJyYWxBcHBQbGF0Zm9ybSI6IldlYiIsInJlZmVycmFsTW9kZSI6InZpZXciLCJyZWZlcnJhbFZpZXciOiJNeUZpbGVzTGlua0NvcHkifX0&e=J5Vklj
