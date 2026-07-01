@@ -28,10 +28,11 @@ Desarrollada en **Kotlin** con **Jetpack Compose** y arquitectura **MVVM**, para
 
 ### Servidor (Dispositivo A)
 - Búsqueda de videos en **YouTube**, **TikTok** y **Google/DuckDuckGo** (sin APIs de pago)
-- Extracción de stream directamente desde la página de YouTube (`ytInitialPlayerResponse`)
+- Extracción de stream vía **Innertube API** (`/youtubei/v1/player`) con 5 clientes Android/TV/iOS
 - Sistema de **caché local** — los videos descargados previamente se sirven sin re-descargar
 - Selección de calidad adaptativa: baja (360p), alta (720p), solo audio
-- Fallbacks automáticos: Cobalt → Invidious (con proxy local) si el stream principal falla
+- Fallbacks automáticos en cadena: Innertube API → scraping `/watch` → Invidious (proxy local)
+- Reintento automático vía proxy Invidious cuando el CDN de YouTube rechaza con HTTP 403
 - Log de actividad en tiempo real visible en pantalla
 
 ### Cliente (Dispositivo B)
@@ -168,9 +169,10 @@ Límite de seguridad: payloads mayores a **20 MB** son rechazados.
 | **Google** | Scraping de resultados DuckDuckGo | N/A (links externos) |
 
 **Fallbacks para YouTube** (en orden):
-1. Extracción directa desde la página `/watch` (primario)
-2. Cobalt API (`api.cobalt.tools`)
-3. Invidious con proxy local (`local=true`) — `iv.datura.network`, `invidious.privacyredirect.com`, `yewtu.be`
+1. **Innertube API** (`/youtubei/v1/player`) con `X-Goog-Visitor-Id` — 5 clientes en orden: `ANDROID_VR` → `ANDROID` → `IOS` → `TVHTML5_SIMPLY_EMBEDDED_PLAYER` → `ANDROID_TESTSUITE`
+2. Parseo de `ytInitialPlayerResponse` desde la página `/watch`
+3. Invidious con proxy local (`local=true`) — `iv.datura.network`, `invidious.privacyredirect.com`, `invidious.nerdvpn.de`, `inv.nadeko.net`, `yewtu.be`, `invidious.fdn.fr`
+4. Reintento de descarga vía proxy Invidious si el CDN responde HTTP 403 (IP binding)
 
 ---
 
